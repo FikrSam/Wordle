@@ -92,40 +92,51 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 16)
 
-                // Stacked Header: Day of week above bold date
-                VStack(spacing: 3) {
+                // Stacked Header: Day of week above bold date (1:1 Sudoku Style)
+                VStack(spacing: 0) {
                     Text(currentDayOfWeek)
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                        .font(.system(size: 32, weight: .bold, design: .default))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    AppSurface.primaryText(for: colorScheme).opacity(0.40),
+                                    AppSurface.primaryText(for: colorScheme).opacity(0.12)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
 
                     Text(currentMonthAndDay)
-                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .font(.system(size: 38, weight: .heavy, design: .default))
                         .foregroundStyle(AppSurface.primaryText(for: colorScheme))
 
-                    // Subtitle / Live status
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(viewModel.dailyCompletedToday ? activePalette.correctColor : activePalette.accentPrimary)
-                            .frame(width: 6, height: 6)
+                    // Subtitle / Live status (Only shown when not completed to eliminate redundancy with solved CTA)
+                    if !viewModel.dailyCompletedToday {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color(red: 0.38, green: 0.82, blue: 0.28))
+                                .frame(width: 6, height: 6)
 
-                        Text(dailySubtitleText)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                            Text("Daily Wordle • 5 Letters • Puzzle #\(dayOfYear)")
+                                .font(.system(size: 13, weight: .medium, design: .default))
+                                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                        }
+                        .padding(.top, 6)
                     }
-                    .padding(.top, 4)
                 }
 
-                Spacer(minLength: 16)
+                Spacer(minLength: 14)
 
-                // Board Preview (Pure surface contrast, no borders)
+                // Board Preview (Enlarged preview, pure surface contrast, no borders)
                 dailyBoardPreview
 
-                Spacer(minLength: 18)
+                Spacer(minLength: 16)
 
                 // Play / Solved CTA Button (No border, no shadow)
                 dailyPlayButton
 
-                Spacer(minLength: 18)
+                Spacer(minLength: 16)
             }
             .frame(maxWidth: .infinity)
             .background(
@@ -134,18 +145,6 @@ struct HomeView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private var dailySubtitleText: String {
-        if viewModel.dailyCompletedToday {
-            if viewModel.dailyWinToday {
-                return "Solved today • \(viewModel.dailyGuessesToday) \(viewModel.dailyGuessesToday == 1 ? "guess" : "guesses")"
-            } else {
-                return "Completed for today"
-            }
-        } else {
-            return "Daily Wordle • 5 Letters • Puzzle #\(dayOfYear)"
-        }
     }
 
     // MARK: - Daily Board Preview
@@ -159,7 +158,7 @@ struct HomeView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(AppSurface.recessed(for: colorScheme))
@@ -170,24 +169,24 @@ struct HomeView: View {
     private func dailyTileView(row: Int, col: Int) -> some View {
         let (fill, letter) = dailyTileData(row: row, col: col)
 
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(fill)
             .overlay(
                 Group {
                     if let letter {
                         Text(String(letter))
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .font(.system(size: 21, weight: .heavy, design: .default))
                             .foregroundStyle(.white)
                     }
                 }
             )
-            .frame(width: 36, height: 36)
+            .frame(width: 46, height: 46)
     }
 
     private func dailyTileData(row: Int, col: Int) -> (fill: Color, letter: Character?) {
         // If daily completed, display the player's actual solved board
-        if viewModel.dailyCompletedToday && row < viewModel.grid.count {
-            let tile = viewModel.grid[row].tiles[col]
+        if viewModel.dailyCompletedToday && row < viewModel.dailyGrid.count {
+            let tile = viewModel.dailyGrid[row].tiles[col]
             switch tile.state {
             case .correct:
                 return (activePalette.correctColor, tile.letter)

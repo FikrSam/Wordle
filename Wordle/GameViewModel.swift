@@ -13,7 +13,8 @@ final class GameViewModel {
     // MARK: - Game State
     var gameMode: GameMode = .classic
     var secretWord: String = ""
-    var grid: [WordleRow] = []
+    var grid: [WordleRow] = (0..<6).map { _ in WordleRow() }
+    var dailyGrid: [WordleRow] = (0..<6).map { _ in WordleRow() }
     var currentRowIndex: Int = 0
     var isGameOver: Bool = false
     var isVictory: Bool = false
@@ -584,6 +585,7 @@ final class GameViewModel {
         self.dailyCompletedToday = true
         self.dailyWinToday = didWin
         self.dailyGuessesToday = guesses
+        self.dailyGrid = self.grid
     }
 
     private func loadDailyRecord(for key: String) -> DailyGameRecord? {
@@ -595,30 +597,54 @@ final class GameViewModel {
     }
 
     private func restoreBoard(from savedGuesses: [String]) {
+        let dailyWord = WordProvider.dailyWord().uppercased()
+        let targetChars = Array(dailyWord)
+        guard targetChars.count == 5 else { return }
+
+        if dailyGrid.count < 6 {
+            dailyGrid = (0..<6).map { _ in WordleRow() }
+        }
+        if grid.count < 6 {
+            grid = (0..<6).map { _ in WordleRow() }
+        }
+
         for (rIdx, guess) in savedGuesses.enumerated() {
             guard rIdx < 6 else { break }
-            let chars = Array(guess)
+            let chars = Array(guess.uppercased())
             for (cIdx, char) in chars.enumerated() {
-                guard cIdx < 5 else { break }
-                grid[rIdx].tiles[cIdx].letter = char
-                let targetChars = Array(secretWord)
+                guard cIdx < 5, cIdx < targetChars.count else { break }
+                let state: TileEvaluationState
                 if targetChars[cIdx] == char {
-                    grid[rIdx].tiles[cIdx].state = .correct
-                    keyboardStates[char] = .correct
+                    state = .correct
                 } else if targetChars.contains(char) {
-                    grid[rIdx].tiles[cIdx].state = .present
-                    if keyboardStates[char] != .correct {
-                        keyboardStates[char] = .present
-                    }
+                    state = .present
                 } else {
-                    grid[rIdx].tiles[cIdx].state = .absent
-                    if keyboardStates[char] == nil {
-                        keyboardStates[char] = .absent
+                    state = .absent
+                }
+
+                dailyGrid[rIdx].tiles[cIdx].letter = char
+                dailyGrid[rIdx].tiles[cIdx].state = state
+
+                if gameMode == .daily {
+                    grid[rIdx].tiles[cIdx].letter = char
+                    grid[rIdx].tiles[cIdx].state = state
+                    if state == .correct {
+                        keyboardStates[char] = .correct
+                    } else if state == .present {
+                        if keyboardStates[char] != .correct {
+                            keyboardStates[char] = .present
+                        }
+                    } else if state == .absent {
+                        if keyboardStates[char] == nil {
+                            keyboardStates[char] = .absent
+                        }
                     }
                 }
             }
         }
-        currentRowIndex = savedGuesses.count
+        if gameMode == .daily {
+            currentRowIndex = min(savedGuesses.count, 6)
+        }
     }
 
     func saveCoins() {
@@ -634,6 +660,15 @@ final class GameViewModel {
         if let statsData = UserDefaults.standard.data(forKey: "game_stats"),
            let loadedStats = try? JSONDecoder().decode(GameStats.self, from: statsData) {
             self.stats = loadedStats
+        }
+
+        // Check if daily puzzle is already completed today
+        let dateKey = todayDateKey()
+        if let record = loadDailyRecord(for: dateKey), record.isCompleted {
+            self.dailyCompletedToday = true
+            self.dailyWinToday = record.didWin
+            self.dailyGuessesToday = record.guessesCount
+            self.restoreBoard(from: record.guesses)
         }
     }
 
