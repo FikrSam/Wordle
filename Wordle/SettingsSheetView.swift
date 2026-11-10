@@ -225,7 +225,7 @@ struct SettingsSheetView: View {
                             .font(.system(size: 15, weight: .semibold, design: .default))
                             .foregroundStyle(AppSurface.primaryText(for: colorScheme))
 
-                        Text("Audio on letter evaluation")
+                        Text("Wins, losses and invalid words")
                             .font(.system(size: 12, weight: .regular, design: .default))
                             .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
                     }
