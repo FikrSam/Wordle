@@ -241,13 +241,13 @@ struct HomeView: View {
             HapticsManager.shared.keyTap()
             onSelectMode(.classic)
         }) {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Image(systemName: "infinity")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(activePalette.accentPrimary)
 
                 Text("Classic Endless")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(AppSurface.primaryText(for: colorScheme))
 
                 Spacer()
@@ -265,13 +265,13 @@ struct HomeView: View {
                 }
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
             }
-            .padding(.horizontal, 18)
-            .frame(height: 58)
+            .padding(.horizontal, 20)
+            .frame(height: 72)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(AppSurface.card(for: colorScheme))
             )
         }
