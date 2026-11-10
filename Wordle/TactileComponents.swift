@@ -130,7 +130,6 @@ struct TactileKeycapButton: View {
     var body: some View {
         Button(action: {
             guard !isEliminated else { return }
-            HapticsManager.shared.keyTap()
             action()
         }) {
             ZStack(alignment: .bottom) {
@@ -162,12 +161,25 @@ struct TactileKeycapButton: View {
             .frame(height: 52)
             .frame(maxWidth: width ?? .infinity)
             .opacity(isEliminated ? 0.38 : 1.0)
+            .scaleEffect(isEliminated ? 0.86 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isPressed)
             .animation(.easeInOut(duration: 0.25), value: state)
             .animation(.easeInOut(duration: 0.25), value: isEliminated)
         }
         .buttonStyle(KeycapButtonStyle(isPressed: $isPressed))
         .disabled(isEliminated)
+        .accessibilityLabel(icon != nil ? "Delete" : title)
+        .accessibilityValue(accessibilityStateText)
+    }
+
+    private var accessibilityStateText: String {
+        if isEliminated { return "eliminated" }
+        switch state {
+        case .correct: return "correct"
+        case .present: return "in word"
+        case .absent: return "not in word"
+        case .empty, .typing: return ""
+        }
     }
 }
 
@@ -187,16 +199,20 @@ private struct KeycapButtonStyle: ButtonStyle {
 struct CoinBadgeView: View {
     let coins: Int
     @Environment(\.colorScheme) private var colorScheme
+    @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "circle.circle.fill")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(Color(red: 0.98, green: 0.72, blue: 0.15))
+                .rotation3DEffect(.degrees(pulse ? 180 : 0), axis: (x: 0, y: 1, z: 0))
 
             Text("\(coins)")
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
                 .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+                .contentTransition(.numericText(value: Double(coins)))
+                .monospacedDigit()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -204,6 +220,16 @@ struct CoinBadgeView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(AppSurface.recessed(for: colorScheme))
         )
+        .scaleEffect(pulse ? 1.12 : 1.0)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: coins)
+        .onChange(of: coins) { _, _ in
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) { pulse = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { pulse = false }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(coins) coins")
     }
 }
 
@@ -225,7 +251,6 @@ struct TactilePowerUpButton: View {
 
     var body: some View {
         Button(action: {
-            HapticsManager.shared.powerUpTrigger()
             action()
         }) {
             ZStack(alignment: .bottom) {
@@ -260,8 +285,11 @@ struct TactilePowerUpButton: View {
             .frame(width: 60, height: 54)
             .scaleEffect(isPressed ? 0.94 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.65), value: isPressed)
+            .animation(.easeInOut(duration: 0.25), value: isAffordable)
         }
         .buttonStyle(KeycapButtonStyle(isPressed: $isPressed))
+        .accessibilityLabel(powerUp.title)
+        .accessibilityValue("\(coinCost) coins")
     }
 }
 
@@ -270,6 +298,8 @@ enum SubmitButtonState: Equatable {
     case incomplete  // < 5 letters entered (grey / recessed)
     case valid       // 5 letters entered & verified valid word (green / accent)
     case invalid     // 5 letters entered & NOT in word list (red / matte crimson)
+    case busy        // tiles flipping — taps ignored
+    case proceed(String) // game over: "NEXT WORD" / "RESULTS"
 }
 
 // MARK: - Zone D: Wide Plump SUBMIT Button
@@ -286,39 +316,44 @@ struct TactileSubmitButton: View {
 
     private var faceColor: Color {
         switch state {
-        case .valid:
+        case .valid, .proceed:
             return activePalette.accentPrimary
         case .invalid:
             return Color(red: 0.92, green: 0.26, blue: 0.26) // Matte Crimson Red
-        case .incomplete:
+        case .incomplete, .busy:
             return AppSurface.recessed(for: colorScheme)
         }
     }
 
     private var lipColor: Color {
         switch state {
-        case .valid:
+        case .valid, .proceed:
             return activePalette.accentPrimary.opacity(0.8)
         case .invalid:
             return Color(red: 0.72, green: 0.18, blue: 0.18) // Darker Red lip
-        case .incomplete:
+        case .incomplete, .busy:
             return AppSurface.border(for: colorScheme)
         }
     }
 
+    private var label: String {
+        if case .proceed(let text) = state { return text }
+        return "SUBMIT"
+    }
+
     private var textColor: Color {
         switch state {
-        case .valid, .invalid:
+        case .valid, .invalid, .proceed:
             return .white
-        case .incomplete:
+        case .incomplete, .busy:
             return AppSurface.secondaryText(for: colorScheme)
         }
     }
 
     var body: some View {
         Button(action: {
-            guard state != .incomplete else { return }
-            HapticsManager.shared.submitTap()
+            guard state != .busy else { return }
+            if state != .incomplete { HapticsManager.shared.submitTap() }
             action()
         }) {
             ZStack(alignment: .bottom) {
@@ -334,10 +369,13 @@ struct TactileSubmitButton: View {
                     .frame(height: 50)
                     .overlay(
                         HStack(spacing: 8) {
-                            Text("SUBMIT")
-                                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                            Text(label)
+                                .font(.system(size: label.count > 7 ? 15 : 18, weight: .heavy, design: .rounded))
                                 .tracking(1.0)
                                 .foregroundStyle(textColor)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .contentTransition(.interpolate)
                         }
                     )
                     .offset(y: isPressed ? 2.5 : 0)
@@ -389,6 +427,7 @@ struct CircularPillButton: View {
     var body: some View {
         Button(action: {
             HapticsManager.shared.keyTap()
+            SoundManager.shared.play(.uiTap)
             action()
         }) {
             ZStack {
@@ -486,39 +525,66 @@ struct ToastBannerView: View {
     }
 }
 
+// MARK: - Pressable Card Style (scale-down feedback for large tappable cards)
+struct PressableCardStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.97
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? pressedScale : 1.0)
+            .brightness(configuration.isPressed ? -0.02 : 0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Confetti Particle Burst
+/// Two cannons fire from the lower corners; particles follow simple ballistic
+/// motion with drag, flutter, and spin, then fade out. Positions are computed
+/// from elapsed time, so the burst animates smoothly at any frame rate.
 struct ConfettiBurstView: View {
-    @State private var particles: [ConfettiParticle] = []
+    // Seeded in the @State initializer: the previous onAppear-based setup never
+    // populated the particles, so the burst rendered nothing.
+    @State private var particles: [ConfettiParticle] = ConfettiBurstView.makeParticles()
+    @State private var startDate = Date()
+
+    private let lifetime: Double = 3.6
 
     var body: some View {
         TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSince(startDate)
             Canvas { context, size in
-                for particle in particles {
-                    let rect = CGRect(
-                        x: particle.x,
-                        y: particle.y,
-                        width: particle.size,
-                        height: particle.size * 0.6
-                    )
-                    var shapeContext = context
-                    shapeContext.translateBy(x: rect.midX, y: rect.midY)
-                    shapeContext.rotate(by: Angle(degrees: particle.rotation))
-                    shapeContext.fill(
-                        RoundedRectangle(cornerRadius: 2, style: .continuous).path(
-                            in: CGRect(x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height)
-                        ),
-                        with: .color(particle.color)
-                    )
+                guard t < lifetime else { return }
+                for p in particles {
+                    let lt = t - p.delay
+                    guard lt > 0 else { continue }
+
+                    // Exponential drag on velocity, constant gravity
+                    let k = 1.6, gravity = 290.0
+                    let dragFactor = (1 - exp(-k * lt)) / k
+                    let x = p.origin.x * size.width + p.vx * dragFactor + sin(lt * p.flutter) * 10
+                    let y = p.origin.y * size.height + p.vy * dragFactor + 0.5 * gravity * lt * lt
+
+                    guard y < size.height + 40 else { continue }
+
+                    let fade = min(1, max(0, (lifetime - t) / 0.8))
+                    let wobble = abs(cos(lt * p.spin * 0.05))
+                    var ctx = context
+                    ctx.opacity = fade
+                    ctx.translateBy(x: x, y: y)
+                    ctx.rotate(by: .degrees(p.rotation + lt * p.spin))
+                    let rect = CGRect(x: -p.size / 2, y: -p.size * 0.3 * wobble, width: p.size, height: max(1.5, p.size * 0.6 * wobble))
+                    let path = p.isCircle
+                        ? Circle().path(in: CGRect(x: -p.size / 3, y: -p.size / 3, width: p.size / 1.5, height: p.size / 1.5))
+                        : RoundedRectangle(cornerRadius: 2, style: .continuous).path(in: rect)
+                    ctx.fill(path, with: .color(p.color))
                 }
             }
         }
-        .onAppear {
-            generateParticles()
-        }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
-    private func generateParticles() {
+    private static func makeParticles() -> [ConfettiParticle] {
         let colors: [Color] = [
             Color(red: 0.18, green: 0.74, blue: 0.52),
             Color(red: 0.31, green: 0.27, blue: 0.90),
@@ -529,25 +595,40 @@ struct ConfettiBurstView: View {
         ]
 
         var newParticles: [ConfettiParticle] = []
-        for _ in 0..<80 {
-            let p = ConfettiParticle(
-                x: CGFloat.random(in: 40...350),
-                y: CGFloat.random(in: 50...250),
-                size: CGFloat.random(in: 8...14),
+        for i in 0..<110 {
+            let fromLeft = i % 2 == 0
+            let speed = Double.random(in: 650...1150)
+            // Aim up and toward the centre of the screen
+            let angle = fromLeft
+                ? Double.random(in: -80 ... -50) * .pi / 180
+                : Double.random(in: -130 ... -100) * .pi / 180
+            newParticles.append(ConfettiParticle(
+                origin: CGPoint(x: fromLeft ? -0.02 : 1.02, y: 0.78),
+                vx: cos(angle) * speed,
+                vy: sin(angle) * speed,
+                size: CGFloat.random(in: 7...13),
                 color: colors.randomElement() ?? .yellow,
-                rotation: Double.random(in: 0...360)
-            )
-            newParticles.append(p)
+                rotation: Double.random(in: 0...360),
+                spin: Double.random(in: -540...540),
+                flutter: Double.random(in: 3...7),
+                delay: Double.random(in: 0...0.18),
+                isCircle: Int.random(in: 0..<5) == 0
+            ))
         }
-        particles = newParticles
+        return newParticles
     }
 }
 
 private struct ConfettiParticle: Identifiable {
     let id = UUID()
-    var x: CGFloat
-    var y: CGFloat
+    var origin: CGPoint
+    var vx: Double
+    var vy: Double
     var size: CGFloat
     var color: Color
     var rotation: Double
+    var spin: Double
+    var flutter: Double
+    var delay: Double
+    var isCircle: Bool
 }

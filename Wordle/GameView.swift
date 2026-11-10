@@ -123,6 +123,8 @@ struct GameView: View {
                     Text("\(viewModel.score)")
                         .font(.system(size: 18, weight: .black, design: .rounded))
                         .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+                        .contentTransition(.numericText(value: Double(viewModel.score)))
+                        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.score)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
@@ -185,7 +187,7 @@ struct GameView: View {
                 Text(String(letter))
                     .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .foregroundStyle(tileTextColor(for: tile.state))
-                    .scaleEffect(tile.scale)
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
 
             // Power-Up Revealed Indicator
@@ -203,11 +205,25 @@ struct GameView: View {
             }
         }
         .aspectRatio(1.0, contentMode: .fit)
+        .scaleEffect(tile.scale)
         .rotation3DEffect(
             .degrees(tile.flipAngle),
-            axis: (x: 1.0, y: 0.0, z: 0.0)
+            axis: (x: 1.0, y: 0.0, z: 0.0),
+            perspective: 0.6
         )
         .offset(y: tile.bounceOffset)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tileAccessibilityLabel(tile))
+    }
+
+    private func tileAccessibilityLabel(_ tile: WordleTile) -> String {
+        guard let letter = tile.letter else { return "Empty" }
+        switch tile.state {
+        case .correct: return "\(letter), correct"
+        case .present: return "\(letter), in the word, wrong spot"
+        case .absent: return "\(letter), not in the word"
+        case .empty, .typing: return tile.isRevealed ? "\(letter), revealed" : String(letter)
+        }
     }
 
     private func tileFillColor(for state: TileEvaluationState) -> Color {
@@ -336,8 +352,11 @@ struct GameView: View {
 
             // Primary SUBMIT Button — green when valid word, red when not a word, grey when incomplete
             let submitState: SubmitButtonState = {
-                guard viewModel.currentRowIndex < 6 && !viewModel.isEvaluating && !viewModel.isGameOver else {
-                    return .incomplete
+                if viewModel.isGameOver {
+                    return .proceed(viewModel.gameMode == .classic ? "NEXT WORD" : "RESULTS")
+                }
+                guard viewModel.currentRowIndex < 6 && !viewModel.isEvaluating else {
+                    return .busy
                 }
                 let row = viewModel.grid[viewModel.currentRowIndex]
                 guard row.isComplete else {
@@ -347,7 +366,19 @@ struct GameView: View {
             }()
 
             TactileSubmitButton(state: submitState) {
-                viewModel.submitGuess()
+                if viewModel.isGameOver {
+                    // After dismissing the result modal, the dock offers a way forward
+                    // instead of leaving the player on a dead board.
+                    if viewModel.gameMode == .classic {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            viewModel.startNewGame(mode: .classic)
+                        }
+                    } else {
+                        viewModel.showCelebration = true
+                    }
+                } else {
+                    viewModel.submitGuess()
+                }
             }
 
             // Skip Word (Classic Mode only - 25 Coins)
@@ -373,6 +404,8 @@ private struct CelebrationModalView: View {
     var onDismiss: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var appeared = false
+    @State private var displayedCoins = 0
     private var activePalette: ThemePalette {
         SettingsManager.shared.themePalette
     }
@@ -388,7 +421,10 @@ private struct CelebrationModalView: View {
                 Image(systemName: viewModel.isVictory ? "trophy.fill" : "xmark")
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(viewModel.isVictory ? activePalette.correctColor : Color(red: 0.96, green: 0.25, blue: 0.37))
+                    .symbolEffect(.bounce, value: appeared)
             }
+            .scaleEffect(appeared ? 1 : 0.4)
+            .rotationEffect(.degrees(appeared ? 0 : -25))
             .padding(.top, 4)
 
             // Title & Word
@@ -411,7 +447,7 @@ private struct CelebrationModalView: View {
 
             // Stats
             HStack(spacing: 10) {
-                statPill(title: "Guesses", value: viewModel.isVictory ? "\(viewModel.currentRowIndex + 1)/6" : "X/6")
+                statPill(title: "Guesses", value: viewModel.isVictory ? "\(viewModel.guessesUsed)/6" : "X/6")
                 statPill(title: "Streak", value: "\(viewModel.stats.currentStreak)")
                 if viewModel.gameMode == .classic {
                     statPill(title: "Score", value: "\(viewModel.score)")
@@ -432,16 +468,18 @@ private struct CelebrationModalView: View {
                         }
                         Spacer()
                         HStack(spacing: 4) {
-                            Text("+\(viewModel.lastCoinsEarned)")
+                            Text("+\(displayedCoins)")
                                 .font(.system(size: 14, weight: .heavy, design: .rounded))
                                 .foregroundStyle(Color(red: 0.98, green: 0.72, blue: 0.15))
+                                .contentTransition(.numericText(value: Double(displayedCoins)))
+                                .monospacedDigit()
                             Image(systemName: "circle.circle.fill")
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(Color(red: 0.98, green: 0.72, blue: 0.15))
                         }
                     }
 
-                    ForEach(viewModel.lastRewardBreakdown) { reward in
+                    ForEach(Array(viewModel.lastRewardBreakdown.enumerated()), id: \.element.id) { index, reward in
                         HStack {
                             HStack(spacing: 6) {
                                 Image(systemName: reward.icon)
@@ -456,6 +494,9 @@ private struct CelebrationModalView: View {
                                 .font(.system(size: 12, weight: .heavy, design: .rounded))
                                 .foregroundStyle(AppSurface.primaryText(for: colorScheme))
                         }
+                        .opacity(appeared ? 1 : 0)
+                        .offset(x: appeared ? 0 : -14)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.25 + Double(index) * 0.08), value: appeared)
                     }
                 }
                 .padding(12)
@@ -467,9 +508,13 @@ private struct CelebrationModalView: View {
 
             // Action Button
             Button(action: {
+                HapticsManager.shared.submitTap()
+                SoundManager.shared.play(.uiTap)
                 onDismiss()
                 if viewModel.gameMode == .classic {
-                    viewModel.startNewGame(mode: .classic)
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        viewModel.startNewGame(mode: .classic)
+                    }
                 }
             }) {
                 Text(viewModel.gameMode == .classic ? "Next Word" : "Done")
@@ -482,6 +527,7 @@ private struct CelebrationModalView: View {
                             .fill(activePalette.accentPrimary)
                     )
             }
+            .buttonStyle(PressableCardStyle(pressedScale: 0.96))
             .padding(.top, 4)
         }
         .padding(20)
@@ -490,6 +536,18 @@ private struct CelebrationModalView: View {
                 .fill(AppSurface.card(for: colorScheme))
         )
         .frame(maxWidth: 330)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.08)) {
+                appeared = true
+            }
+            // Count the reward total up once the rows have landed
+            let target = viewModel.lastCoinsEarned
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                withAnimation(.easeOut(duration: 0.6)) {
+                    displayedCoins = target
+                }
+            }
+        }
     }
 
     private func statPill(title: String, value: String) -> some View {

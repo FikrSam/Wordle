@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var viewModel = GameViewModel()
     @State private var settings = SettingsManager.shared
     @State private var destination: ScreenDestination = ProcessInfo.processInfo.arguments.contains("-startInGame") ? .game(.daily) : .home
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -25,8 +26,9 @@ struct ContentView: View {
                     viewModel: viewModel,
                     settings: settings,
                     onSelectMode: { mode in
+                        SoundManager.shared.play(.uiTap)
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
-                            viewModel.startNewGame(mode: mode)
+                            viewModel.enterGame(mode: mode)
                             destination = .game(mode)
                         }
                     }
@@ -52,6 +54,13 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(settings.appearanceMode.colorScheme)
+        .onChange(of: scenePhase) { _, phase in
+            // Pick up a new day's puzzle if the app was left open past midnight
+            if phase == .active {
+                viewModel.refreshDailyStatus()
+                HapticsManager.shared.prepare()
+            }
+        }
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-light") {
                 settings.appearanceMode = .light

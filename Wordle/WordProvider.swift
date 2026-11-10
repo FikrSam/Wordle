@@ -18,7 +18,7 @@ struct WordProvider {
         "BELOW", "BENCH", "BIRTH", "BLACK", "BLADE", "BLAME", "BLAND", "BLANK", "BLAST", "BLAZE",
         "BLEND", "BLESS", "BLIND", "BLOCK", "BLOOD", "BLOOM", "BLOWN", "BOARD", "BOAST", "BONUS",
         "BOOST", "BOOTH", "BOUND", "BRAIN", "BRAND", "BRAVE", "BREAD", "BREAK", "BREED", "BRIEF",
-        "BRIGHT", "BRING", "BRISK", "BROAD", "BROWN", "BRUSH", "BUILD", "BUILT", "BUNCH", "BURST",
+        "BRICK", "BRING", "BRISK", "BROAD", "BROWN", "BRUSH", "BUILD", "BUILT", "BUNCH", "BURST",
         "CABIN", "CABLE", "CAMEL", "CANAL", "CANDY", "CANOE", "CARGO", "CARRY", "CATCH", "CAUSE",
         "CEDAR", "CHAIN", "CHAIR", "CHALK", "CHAMP", "CHANT", "CHAOS", "CHARM", "CHART", "CHASE",
         "CHEAP", "CHECK", "CHEEK", "CHEER", "CHEST", "CHIEF", "CHILD", "CHILL", "CHORD", "CIDER",
@@ -30,8 +30,8 @@ struct WordProvider {
         "DRIVE", "EARLY", "EARTH", "EAGLE", "ELITE", "EMPTY", "ENEMY", "ENJOY", "ENTER", "EQUAL",
         "ERROR", "EVENT", "EVERY", "EXACT", "EXIST", "FAITH", "FALSE", "FANCY", "FAULT", "FAVOR",
         "FEAST", "FIBER", "FIELD", "FIGHT", "FINAL", "FIRST", "FLAME", "FLASH", "FLEET", "FLOAT",
-        "FLOOD", "FLOOR", "FLOUR", "FLOW", "FLUID", "FLUTE", "FOCUS", "FORCE", "FORTH", "FORTY",
-        "FORUM", "FOUND", "FRAME", "FRESH", "FRONT", "FROST", "FRUIT", "GIANT", "GIVEN", "GLANCE",
+        "FLOOD", "FLOOR", "FLOUR", "FLOCK", "FLUID", "FLUTE", "FOCUS", "FORCE", "FORTH", "FORTY",
+        "FORUM", "FOUND", "FRAME", "FRESH", "FRONT", "FROST", "FRUIT", "GIANT", "GIVEN", "GLEAM",
         "GLASS", "GLOBE", "GLORY", "GLOVE", "GRACE", "GRADE", "GRAIN", "GRAND", "GRANT", "GRAPE",
         "GRAPH", "GRASP", "GRASS", "GRAVE", "GREAT", "GREEN", "GREET", "GRIEF", "GRILL", "GROVE",
         "GUARD", "GUESS", "GUIDE", "HABIT", "HAPPY", "HARSH", "HAVEN", "HEART", "HEAVY", "HONOR",
@@ -52,9 +52,9 @@ struct WordProvider {
         "RAISE", "RANCH", "RANGE", "RAPID", "RATIO", "REACH", "REACT", "READY", "REALM", "REBEL",
         "REFER", "RELAX", "RELAY", "RESET", "RIDER", "RIDGE", "RIGHT", "RIVAL", "RIVER", "ROBOT",
         "ROCKY", "ROUND", "ROUTE", "ROYAL", "RULER", "RURAL", "SALAD", "SAUCE", "SCALE", "SCENE",
-        "SCENT", "SCOPE", "SCORE", "SCOUT", "SEDAN", "SENSE", "SERVE", "SEVEN", "SHADE", "SHADOW",
+        "SCENT", "SCOPE", "SCORE", "SCOUT", "SEDAN", "SENSE", "SERVE", "SEVEN", "SHADE", "SHAFT",
         "SHAKE", "SHARE", "SHARP", "SHEEP", "SHEET", "SHELF", "SHELL", "SHIFT", "SHINE", "SHIRT",
-        "SHOCK", "SHORE", "SHORT", "SIGHT", "SILVER", "SIMPLE", "SKILL", "SKIRT", "SLATE", "SLEEP",
+        "SHOCK", "SHORE", "SHORT", "SIGHT", "SINCE", "SIREN", "SKILL", "SKIRT", "SLATE", "SLEEP",
         "SLICE", "SLIDE", "SMART", "SMILE", "SMOKE", "SOLAR", "SOLID", "SOLVE", "SOUND", "SOUTH",
         "SPACE", "SPARK", "SPEAR", "SPEED", "SPELL", "SPEND", "SPICE", "SPILL", "SPINE", "SPITE",
         "SPLIT", "SPORT", "SQUAD", "STAFF", "STAGE", "STAIN", "STAIR", "STAKE", "STAND", "START",
@@ -70,27 +70,34 @@ struct WordProvider {
         "YOUNG", "YOUTH", "ZEBRA"
     ]
 
-    private static let targetWordSet: Set<String> = {
-        Set(curatedTargetWords.map { $0.uppercased() })
+    /// Target pool sanitized to exactly-5-letter A–Z words, so a malformed
+    /// entry can never become an unwinnable (or crashing) secret word.
+    static let targetWords: [String] = {
+        var seen = Set<String>()
+        return curatedTargetWords
+            .map { $0.uppercased() }
+            .filter { $0.count == 5 && $0.allSatisfy { ("A"..."Z").contains($0) } && seen.insert($0).inserted }
     }()
+
+    private static let targetWordSet: Set<String> = Set(targetWords)
 
     private static let textChecker = UITextChecker()
 
     /// Deterministically retrieves a 5-letter word for a given date
     static func dailyWord(for date: Date = Date()) -> String {
-        let calendar = Calendar.current
+        let calendar = Calendar(identifier: .gregorian)
         let year = calendar.component(.year, from: date)
         let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 1
         
         // Deterministic hash based on year and day of year
         let seed = abs((year * 365 + dayOfYear * 31) ^ 0x5DEECE66D)
-        let index = seed % curatedTargetWords.count
-        return curatedTargetWords[index].uppercased()
+        let index = seed % targetWords.count
+        return targetWords[index]
     }
 
     /// Random target word for Classic Endless mode
     static func randomTargetWord() -> String {
-        curatedTargetWords.randomElement()?.uppercased() ?? "SWIFT"
+        targetWords.randomElement() ?? "SWIFT"
     }
 
     /// Validates if a 5-letter string is a legitimate English word

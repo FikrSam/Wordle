@@ -59,6 +59,7 @@ struct HomeView: View {
             .preferredColorScheme(settings.appearanceMode.colorScheme)
         }
         .onAppear {
+            viewModel.refreshDailyStatus()
             if ProcessInfo.processInfo.arguments.contains("-openSettings") {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 400_000_000)
@@ -152,7 +153,12 @@ struct HomeView: View {
                     .fill(AppSurface.card(for: colorScheme))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle(pressedScale: 0.98))
+    }
+
+    /// True when a daily game was started today but not finished (resumable).
+    private var isDailyInProgress: Bool {
+        viewModel.gameMode == .daily && !viewModel.isGameOver && viewModel.guessesUsed > 0
     }
 
     // MARK: - Daily Board Preview
@@ -189,6 +195,7 @@ struct HomeView: View {
                 }
             )
             .frame(width: 46, height: 46)
+            .animation(.easeInOut(duration: 0.3).delay(Double(row * 5 + col) * 0.015), value: viewModel.dailyCompletedToday)
     }
 
     private func dailyTileData(row: Int, col: Int) -> (fill: Color, letter: Character?) {
@@ -229,7 +236,7 @@ struct HomeView: View {
                 Image(systemName: "play.fill")
                     .font(.system(size: 14, weight: .black))
 
-                Text("Play Daily")
+                Text(isDailyInProgress ? "Continue" : "Play Daily")
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
             }
         }
@@ -282,7 +289,7 @@ struct HomeView: View {
                     .fill(AppSurface.card(for: colorScheme))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
     }
 
     // MARK: - Calendar Week Strip (No borders, no shadows)
@@ -374,9 +381,7 @@ struct HomeView: View {
                 numFormatter.dateFormat = "d"
                 let dayNum = numFormatter.string(from: date)
 
-                let keyFormatter = DateFormatter()
-                keyFormatter.dateFormat = "yyyy-MM-dd"
-                let key = keyFormatter.string(from: date)
+                let key = GameViewModel.dateKey(for: date)
 
                 let isToday = (offset == 0)
                 let isCompleted = UserDefaults.standard.data(forKey: "daily_record_\(key)") != nil

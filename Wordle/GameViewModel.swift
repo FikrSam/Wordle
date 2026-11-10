@@ -51,13 +51,49 @@ final class GameViewModel {
     /// Whether the current row's word is a valid English word (for submit button state)
     var isCurrentWordValid: Bool = false
 
+    /// Identifies the current game. Every delayed callback captures it and bails out
+    /// if a new game has started in the meantime, so stale flip/bounce/finalize
+    /// timers can never mutate (or score) a different board.
+    private var gameID = UUID()
+    private var toastID = UUID()
+
+    /// Number of rows the player has submitted in the current game.
+    var guessesUsed: Int {
+        grid.filter { row in row.tiles.contains { [.correct, .present, .absent].contains($0.state) } }.count
+    }
+
     init() {
         loadData()
         startNewGame(mode: .classic)
+        SoundManager.shared.prepare()
+    }
+
+    /// Schedules work on the main queue that is dropped if the game changes first.
+    private func after(_ delay: Double, _ work: @escaping () -> Void) {
+        let id = gameID
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.gameID == id else { return }
+            work()
+        }
+    }
+
+    // MARK: - Enter Game (resume if possible)
+    /// Resumes an unfinished game of the same mode instead of throwing the board away.
+    /// (Previously, backing out and re-entering silently discarded progress, which also
+    /// let players dodge a loss.)
+    func enterGame(mode: GameMode) {
+        let canResume = mode == gameMode
+            && !isGameOver
+            && !secretWord.isEmpty
+            && (mode == .classic || secretWord == WordProvider.dailyWord())
+        if !canResume {
+            startNewGame(mode: mode)
+        }
     }
 
     // MARK: - Start Game
     func startNewGame(mode: GameMode, force: Bool = false) {
+        self.gameID = UUID()
         self.gameMode = mode
         self.isGameOver = false
         self.isVictory = false
@@ -85,7 +121,8 @@ final class GameViewModel {
                 self.dailyGuessesToday = record.guessesCount
                 self.isGameOver = true
                 self.isVictory = record.didWin
-                restoreBoard(from: record.guesses)
+                if record.word.count == 5 { self.secretWord = record.word.uppercased() }
+                restoreBoard(from: record)
                 return
             } else {
                 self.dailyCompletedToday = false
@@ -104,6 +141,8 @@ final class GameViewModel {
 
         // Find first empty tile
         if let emptyIndex = row.tiles.firstIndex(where: { $0.letter == nil }) {
+            HapticsManager.shared.keyTap()
+            SoundManager.shared.play(.keyTap)
             row.tiles[emptyIndex].letter = Character(char.uppercased())
             row.tiles[emptyIndex].state = .typing
             row.tiles[emptyIndex].scale = 1.15
@@ -127,6 +166,7 @@ final class GameViewModel {
         // Find last non-nil letter that was not locked/revealed by power-up
         if let lastFilledIndex = row.tiles.lastIndex(where: { $0.letter != nil && !$0.isRevealed }) {
             HapticsManager.shared.keyDelete()
+            SoundManager.shared.play(.keyDelete)
             row.tiles[lastFilledIndex].letter = nil
             row.tiles[lastFilledIndex].state = .empty
             row.tiles[lastFilledIndex].scale = 1.0
@@ -163,6 +203,7 @@ final class GameViewModel {
             triggerShake()
             showToast("Not enough letters", icon: "exclamationmark.triangle.fill")
             HapticsManager.shared.invalidWordError()
+            SoundManager.shared.play(.invalid)
             return
         }
 
@@ -173,6 +214,7 @@ final class GameViewModel {
             triggerShake()
             showToast("Not in word list", icon: "character.bubble.fill")
             HapticsManager.shared.invalidWordError()
+            SoundManager.shared.play(.invalid)
             return
         }
 
@@ -181,38 +223,43 @@ final class GameViewModel {
     }
 
     // MARK: - Evaluation with 3D Flip
-    private func evaluateRow(guess: String) {
-        isEvaluating = true
-        isCurrentWordValid = false // Reset during evaluation
-        let targetChars = Array(secretWord.uppercased())
-        let guessChars = Array(guess)
-        var targetLetterCounts: [Character: Int] = [:]
-        for c in targetChars {
-            targetLetterCounts[c, default: 0] += 1
+    /// Standard two-pass Wordle scoring that handles duplicate letters correctly.
+    static func evaluate(guess: String, target: String) -> [TileEvaluationState] {
+        let guessChars = Array(guess.uppercased())
+        let targetChars = Array(target.uppercased())
+        guard guessChars.count == 5, targetChars.count == 5 else {
+            return Array(repeating: .absent, count: 5)
         }
 
+        var remaining: [Character: Int] = [:]
         var results: [TileEvaluationState] = Array(repeating: .absent, count: 5)
 
-        // Pass 1: Correct letters
+        // Pass 1: exact matches; count the unmatched target letters
         for i in 0..<5 {
             if guessChars[i] == targetChars[i] {
                 results[i] = .correct
-                targetLetterCounts[guessChars[i], default: 1] -= 1
+            } else {
+                remaining[targetChars[i], default: 0] += 1
             }
         }
 
-        // Pass 2: Present letters & Absent
-        for i in 0..<5 {
-            if results[i] != .correct {
-                let char = guessChars[i]
-                if let count = targetLetterCounts[char], count > 0 {
-                    results[i] = .present
-                    targetLetterCounts[char] = count - 1
-                } else {
-                    results[i] = .absent
-                }
+        // Pass 2: present letters, consuming the remaining counts
+        for i in 0..<5 where results[i] != .correct {
+            let c = guessChars[i]
+            if let n = remaining[c], n > 0 {
+                results[i] = .present
+                remaining[c] = n - 1
             }
         }
+        return results
+    }
+
+    private func evaluateRow(guess: String) {
+        isEvaluating = true
+        isCurrentWordValid = false // Reset during evaluation
+        let rowIndex = currentRowIndex
+        let guessChars = Array(guess)
+        let results = Self.evaluate(guess: guess, target: secretWord)
 
         // Staggered 3D Flip Animation (0.12s per tile)
         for i in 0..<5 {
@@ -220,31 +267,35 @@ final class GameViewModel {
             let char = guessChars[i]
             let evaluatedState = results[i]
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            after(delay) { [weak self] in
                 guard let self else { return }
 
                 // Flip to 90 degrees
-                withAnimation(.linear(duration: 0.14)) {
-                    self.grid[self.currentRowIndex].tiles[i].flipAngle = 90
+                withAnimation(.easeIn(duration: 0.14)) {
+                    self.grid[rowIndex].tiles[i].flipAngle = 90
                 }
 
                 // Midpoint: swap color & update keyboard
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
-                    self.grid[self.currentRowIndex].tiles[i].state = evaluatedState
-                    self.updateKeyboardState(for: char, with: evaluatedState)
+                self.after(0.14) { [weak self] in
+                    guard let self else { return }
+                    self.grid[rowIndex].tiles[i].state = evaluatedState
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        self.updateKeyboardState(for: char, with: evaluatedState)
+                    }
                     HapticsManager.shared.flipTick(index: i)
+                    SoundManager.shared.play(.flip(evaluatedState, index: i))
 
                     // Flip from 90 to 0 degrees
-                    withAnimation(.linear(duration: 0.14)) {
-                        self.grid[self.currentRowIndex].tiles[i].flipAngle = 0
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        self.grid[rowIndex].tiles[i].flipAngle = 0
                     }
                 }
             }
         }
 
         // Finish evaluation after all 5 flips complete
-        let totalFlipTime = 5 * 0.12 + 0.32
-        DispatchQueue.main.asyncAfter(deadline: .now() + totalFlipTime) { [weak self] in
+        let totalFlipTime = 4 * 0.12 + 0.28 + 0.08
+        after(totalFlipTime) { [weak self] in
             guard let self else { return }
             self.isEvaluating = false
             self.finalizeRowEvaluation(allCorrect: results.allSatisfy { $0 == .correct })
@@ -265,18 +316,24 @@ final class GameViewModel {
             isGameOver = true
             showConfetti = true
             HapticsManager.shared.victory()
+            SoundManager.shared.play(.victory)
+            after(4.0) { [weak self] in self?.showConfetti = false }
 
             // Trigger Joyful Wave Bounce on winning row
+            let winRow = currentRowIndex
             for i in 0..<5 {
                 let bounceDelay = Double(i) * 0.08
-                DispatchQueue.main.asyncAfter(deadline: .now() + bounceDelay) { [weak self] in
+                after(bounceDelay) { [weak self] in
                     guard let self else { return }
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.5)) {
-                        self.grid[self.currentRowIndex].tiles[i].bounceOffset = -18
+                        self.grid[winRow].tiles[i].bounceOffset = -18
+                        self.grid[winRow].tiles[i].scale = 1.08
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                    self.after(0.16) { [weak self] in
+                        guard let self else { return }
                         withAnimation(.spring(response: 0.24, dampingFraction: 0.6)) {
-                            self.grid[self.currentRowIndex].tiles[i].bounceOffset = 0
+                            self.grid[winRow].tiles[i].bounceOffset = 0
+                            self.grid[winRow].tiles[i].scale = 1.0
                         }
                     }
                 }
@@ -289,7 +346,7 @@ final class GameViewModel {
 
             if gameMode == .daily {
                 saveDailyRecord(didWin: true, guesses: guessesUsed)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                after(1.2) { [weak self] in
                     self?.showCelebration = true
                 }
             } else {
@@ -298,7 +355,7 @@ final class GameViewModel {
                     stats.classicHighScore = score
                     saveData()
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                after(1.2) { [weak self] in
                     self?.showCelebration = true
                 }
             }
@@ -307,6 +364,7 @@ final class GameViewModel {
             // GAME OVER - Loss
             isGameOver = true
             HapticsManager.shared.gameOver()
+            SoundManager.shared.play(.defeat)
             showToast("The word was \(secretWord)", icon: "xmark.circle.fill")
             recordLoss()
             calculateLossReward()
@@ -317,7 +375,7 @@ final class GameViewModel {
                 score = 0
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            after(1.6) { [weak self] in
                 self?.showCelebration = true
             }
 
@@ -334,24 +392,23 @@ final class GameViewModel {
         guard !isGameOver, !isEvaluating, currentRowIndex < 6 else { return }
 
         guard coins >= cost else {
-            HapticsManager.shared.keyDelete()
-            showToast("Need \(cost) Coins for Reveal Letter", icon: "exclamationmark.circle.fill")
+            denyPurchase("Need \(cost) Coins for Reveal Letter")
             return
         }
 
         let targetChars = Array(secretWord.uppercased())
         var row = grid[currentRowIndex]
 
-        // Find the first column in the active row that isn't already correct or revealed
-        var targetCol: Int? = nil
-        for c in 0..<5 {
-            if row.tiles[c].letter != targetChars[c] && !row.tiles[c].isRevealed {
-                targetCol = c
-                break
-            }
+        // Columns the player has already solved (green) on an earlier row — revealing
+        // those again would waste coins, so prefer columns that are still unknown.
+        let knownColumns = Set((0..<5).filter { c in
+            grid.prefix(currentRowIndex).contains { $0.tiles[c].state == .correct }
+        })
+        let unresolved = (0..<5).filter { c in
+            row.tiles[c].letter != targetChars[c] && !row.tiles[c].isRevealed
         }
 
-        guard let col = targetCol else {
+        guard let col = unresolved.first(where: { !knownColumns.contains($0) }) ?? unresolved.first else {
             showToast("Letters already match!", icon: "sparkles")
             return
         }
@@ -363,10 +420,12 @@ final class GameViewModel {
         let correctChar = targetChars[col]
         row.tiles[col].letter = correctChar
         row.tiles[col].isRevealed = true
+        row.tiles[col].state = .typing
         row.tiles[col].scale = 1.3
         grid[currentRowIndex] = row
 
         HapticsManager.shared.powerUpTrigger()
+        SoundManager.shared.play(.reveal)
         showToast("-\(cost) Coins • Revealed: \(correctChar)", icon: "sparkles")
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) {
@@ -383,8 +442,7 @@ final class GameViewModel {
         guard !isGameOver, !isEvaluating else { return }
 
         guard coins >= cost else {
-            HapticsManager.shared.keyDelete()
-            showToast("Need \(cost) Coins to Eliminate Letters", icon: "exclamationmark.circle.fill")
+            denyPurchase("Need \(cost) Coins to Eliminate Letters")
             return
         }
 
@@ -407,12 +465,16 @@ final class GameViewModel {
         saveCoins()
 
         let toEliminate = Array(candidates.shuffled().prefix(3))
+        HapticsManager.shared.powerUpTrigger()
 
         for (idx, char) in toEliminate.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(idx) * 0.15) { [weak self] in
+            after(Double(idx) * 0.15) { [weak self] in
                 guard let self else { return }
-                self.eliminatedKeys.insert(char)
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    _ = self.eliminatedKeys.insert(char)
+                }
                 HapticsManager.shared.eliminationTick()
+                SoundManager.shared.play(.eliminate)
             }
         }
 
@@ -426,8 +488,7 @@ final class GameViewModel {
         guard !isGameOver, !isEvaluating, gameMode == .classic else { return }
 
         guard coins >= cost else {
-            HapticsManager.shared.keyDelete()
-            showToast("Need \(cost) Coins to Skip Word", icon: "exclamationmark.circle.fill")
+            denyPurchase("Need \(cost) Coins to Skip Word")
             return
         }
 
@@ -435,14 +496,26 @@ final class GameViewModel {
         hintsUsedInCurrentGame += 1
         saveCoins()
 
+        // Lock input during the hand-off so taps can't land on the outgoing board
+        isEvaluating = true
+
         HapticsManager.shared.powerUpTrigger()
+        SoundManager.shared.play(.skip)
         let oldWord = secretWord
         showToast("-\(cost) Coins • Skipped! Word was \(oldWord)", icon: "forward.end.fill")
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        after(0.6) { [weak self] in
             guard let self else { return }
-            self.startNewGame(mode: .classic)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                self.startNewGame(mode: .classic)
+            }
         }
+    }
+
+    private func denyPurchase(_ message: String) {
+        HapticsManager.shared.invalidWordError()
+        SoundManager.shared.play(.denied)
+        showToast(message, icon: "exclamationmark.circle.fill")
     }
 
     // MARK: - Performance-Based Currency Economy
@@ -502,8 +575,9 @@ final class GameViewModel {
         self.coins += total
         self.saveCoins()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        after(0.3) { [weak self] in
             self?.showToast("+\(total) Coins Earned!", icon: "circle.circle.fill")
+            SoundManager.shared.play(.coin)
         }
     }
 
@@ -518,38 +592,54 @@ final class GameViewModel {
 
     // MARK: - Toast Banner Presentation
     func showToast(_ message: String, icon: String = "info.circle.fill") {
+        let id = UUID()
+        toastID = id
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             self.toastMessage = message
             self.toastIcon = icon
         }
 
+        // Keyed by ID (not message text) so a repeated toast isn't dismissed early
+        // by the previous one's timer.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            guard let self, self.toastID == id else { return }
             withAnimation(.easeInOut(duration: 0.25)) {
-                if self?.toastMessage == message {
-                    self?.toastMessage = nil
-                }
+                self.toastMessage = nil
             }
         }
     }
 
     // MARK: - Shake Animation
     private func triggerShake() {
+        let row = currentRowIndex
         let offsets: [CGFloat] = [-12, 12, -8, 8, -4, 4, 0]
         for (index, offset) in offsets.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.04) { [weak self] in
-                guard let self else { return }
+            after(Double(index) * 0.04) { [weak self] in
+                guard let self, row < self.grid.count else { return }
                 withAnimation(.linear(duration: 0.04)) {
-                    self.grid[self.currentRowIndex].shakeOffset = offset
+                    self.grid[row].shakeOffset = offset
                 }
             }
         }
     }
 
     // MARK: - Persistence & Stats
+    /// Fixed Gregorian/POSIX formatter so the key is stable regardless of the
+    /// user's calendar or locale settings.
+    static let dateKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    static func dateKey(for date: Date) -> String {
+        dateKeyFormatter.string(from: date)
+    }
+
     private func todayDateKey() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        Self.dateKey(for: Date())
     }
 
     private func recordWin(guesses: Int) {
@@ -596,54 +686,47 @@ final class GameViewModel {
         return record
     }
 
-    private func restoreBoard(from savedGuesses: [String]) {
-        let dailyWord = WordProvider.dailyWord().uppercased()
-        let targetChars = Array(dailyWord)
-        guard targetChars.count == 5 else { return }
+    private func restoreBoard(from record: DailyGameRecord, applyToGame: Bool = true) {
+        let target = record.word.count == 5 ? record.word.uppercased() : WordProvider.dailyWord()
+        var restored = (0..<6).map { _ in WordleRow() }
 
-        if dailyGrid.count < 6 {
-            dailyGrid = (0..<6).map { _ in WordleRow() }
-        }
-        if grid.count < 6 {
-            grid = (0..<6).map { _ in WordleRow() }
-        }
-
-        for (rIdx, guess) in savedGuesses.enumerated() {
-            guard rIdx < 6 else { break }
+        for (rIdx, guess) in record.guesses.prefix(6).enumerated() {
             let chars = Array(guess.uppercased())
-            for (cIdx, char) in chars.enumerated() {
-                guard cIdx < 5, cIdx < targetChars.count else { break }
-                let state: TileEvaluationState
-                if targetChars[cIdx] == char {
-                    state = .correct
-                } else if targetChars.contains(char) {
-                    state = .present
-                } else {
-                    state = .absent
-                }
-
-                dailyGrid[rIdx].tiles[cIdx].letter = char
-                dailyGrid[rIdx].tiles[cIdx].state = state
-
-                if gameMode == .daily {
-                    grid[rIdx].tiles[cIdx].letter = char
-                    grid[rIdx].tiles[cIdx].state = state
-                    if state == .correct {
-                        keyboardStates[char] = .correct
-                    } else if state == .present {
-                        if keyboardStates[char] != .correct {
-                            keyboardStates[char] = .present
-                        }
-                    } else if state == .absent {
-                        if keyboardStates[char] == nil {
-                            keyboardStates[char] = .absent
-                        }
-                    }
-                }
+            guard chars.count == 5 else { continue }
+            let states = Self.evaluate(guess: guess, target: target)
+            for c in 0..<5 {
+                restored[rIdx].tiles[c].letter = chars[c]
+                restored[rIdx].tiles[c].state = states[c]
             }
         }
-        if gameMode == .daily {
-            currentRowIndex = min(savedGuesses.count, 6)
+
+        dailyGrid = restored
+
+        if applyToGame && gameMode == .daily {
+            grid = restored
+            keyboardStates.removeAll()
+            for row in restored {
+                for tile in row.tiles {
+                    if let ch = tile.letter { updateKeyboardState(for: ch, with: tile.state) }
+                }
+            }
+            currentRowIndex = min(record.guesses.count, 6)
+        }
+    }
+
+    /// Re-reads today's daily status. Call when the app becomes active or the home
+    /// screen appears so the card doesn't show yesterday's result after midnight.
+    func refreshDailyStatus() {
+        if let record = loadDailyRecord(for: todayDateKey()), record.isCompleted {
+            dailyCompletedToday = true
+            dailyWinToday = record.didWin
+            dailyGuessesToday = record.guessesCount
+            restoreBoard(from: record, applyToGame: false)
+        } else {
+            dailyCompletedToday = false
+            dailyWinToday = false
+            dailyGuessesToday = 0
+            dailyGrid = (0..<6).map { _ in WordleRow() }
         }
     }
 
@@ -663,13 +746,7 @@ final class GameViewModel {
         }
 
         // Check if daily puzzle is already completed today
-        let dateKey = todayDateKey()
-        if let record = loadDailyRecord(for: dateKey), record.isCompleted {
-            self.dailyCompletedToday = true
-            self.dailyWinToday = record.didWin
-            self.dailyGuessesToday = record.guessesCount
-            self.restoreBoard(from: record.guesses)
-        }
+        refreshDailyStatus()
     }
 
     private func saveData() {
@@ -690,6 +767,12 @@ final class GameViewModel {
         UserDefaults.standard.removeObject(forKey: "charges_reveal")
         UserDefaults.standard.removeObject(forKey: "charges_eliminate")
         UserDefaults.standard.removeObject(forKey: "charges_skip")
+        // Also clear saved daily boards; otherwise today's puzzle stayed "completed"
+        // (and the week strip kept its checkmarks) after a full reset.
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix("daily_record_") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        refreshDailyStatus()
         coins = 100
         revealCharges = 2
         eliminateCharges = 2
