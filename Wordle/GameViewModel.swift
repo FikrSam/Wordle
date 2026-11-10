@@ -142,7 +142,6 @@ final class GameViewModel {
         // Find first empty tile
         if let emptyIndex = row.tiles.firstIndex(where: { $0.letter == nil }) {
             HapticsManager.shared.keyTap()
-            SoundManager.shared.play(.keyTap)
             row.tiles[emptyIndex].letter = Character(char.uppercased())
             row.tiles[emptyIndex].state = .typing
             row.tiles[emptyIndex].scale = 1.15
@@ -166,7 +165,6 @@ final class GameViewModel {
         // Find last non-nil letter that was not locked/revealed by power-up
         if let lastFilledIndex = row.tiles.lastIndex(where: { $0.letter != nil && !$0.isRevealed }) {
             HapticsManager.shared.keyDelete()
-            SoundManager.shared.play(.keyDelete)
             row.tiles[lastFilledIndex].letter = nil
             row.tiles[lastFilledIndex].state = .empty
             row.tiles[lastFilledIndex].scale = 1.0
@@ -203,7 +201,6 @@ final class GameViewModel {
             triggerShake()
             showToast("Not enough letters", icon: "exclamationmark.triangle.fill")
             HapticsManager.shared.invalidWordError()
-            SoundManager.shared.play(.invalid)
             return
         }
 
@@ -214,7 +211,7 @@ final class GameViewModel {
             triggerShake()
             showToast("Not in word list", icon: "character.bubble.fill")
             HapticsManager.shared.invalidWordError()
-            SoundManager.shared.play(.invalid)
+            SoundManager.shared.play(.wrongGuess)
             return
         }
 
@@ -283,7 +280,6 @@ final class GameViewModel {
                         self.updateKeyboardState(for: char, with: evaluatedState)
                     }
                     HapticsManager.shared.flipTick(index: i)
-                    SoundManager.shared.play(.flip(evaluatedState, index: i))
 
                     // Flip from 90 to 0 degrees
                     withAnimation(.easeOut(duration: 0.14)) {
@@ -425,7 +421,6 @@ final class GameViewModel {
         grid[currentRowIndex] = row
 
         HapticsManager.shared.powerUpTrigger()
-        SoundManager.shared.play(.reveal)
         showToast("-\(cost) Coins • Revealed: \(correctChar)", icon: "sparkles")
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) {
@@ -474,7 +469,6 @@ final class GameViewModel {
                     _ = self.eliminatedKeys.insert(char)
                 }
                 HapticsManager.shared.eliminationTick()
-                SoundManager.shared.play(.eliminate)
             }
         }
 
@@ -500,7 +494,6 @@ final class GameViewModel {
         isEvaluating = true
 
         HapticsManager.shared.powerUpTrigger()
-        SoundManager.shared.play(.skip)
         let oldWord = secretWord
         showToast("-\(cost) Coins • Skipped! Word was \(oldWord)", icon: "forward.end.fill")
 
@@ -514,7 +507,6 @@ final class GameViewModel {
 
     private func denyPurchase(_ message: String) {
         HapticsManager.shared.invalidWordError()
-        SoundManager.shared.play(.denied)
         showToast(message, icon: "exclamationmark.circle.fill")
     }
 
@@ -577,7 +569,6 @@ final class GameViewModel {
 
         after(0.3) { [weak self] in
             self?.showToast("+\(total) Coins Earned!", icon: "circle.circle.fill")
-            SoundManager.shared.play(.coin)
         }
     }
 

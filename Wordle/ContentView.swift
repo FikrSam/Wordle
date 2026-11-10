@@ -26,7 +26,6 @@ struct ContentView: View {
                     viewModel: viewModel,
                     settings: settings,
                     onSelectMode: { mode in
-                        SoundManager.shared.play(.uiTap)
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                             viewModel.enterGame(mode: mode)
                             destination = .game(mode)

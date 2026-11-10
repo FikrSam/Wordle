@@ -509,7 +509,6 @@ private struct CelebrationModalView: View {
             // Action Button
             Button(action: {
                 HapticsManager.shared.submitTap()
-                SoundManager.shared.play(.uiTap)
                 onDismiss()
                 if viewModel.gameMode == .classic {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {

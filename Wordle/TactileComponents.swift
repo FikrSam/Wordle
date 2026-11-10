@@ -427,7 +427,6 @@ struct CircularPillButton: View {
     var body: some View {
         Button(action: {
             HapticsManager.shared.keyTap()
-            SoundManager.shared.play(.uiTap)
             action()
         }) {
             ZStack {
