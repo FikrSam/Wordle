@@ -16,6 +16,10 @@ struct SettingsSheetView: View {
     @State private var showingResetAlert = false
     @State private var showingStatsSheet = false
 
+    private var activePalette: ThemePalette {
+        settings.themePalette
+    }
+
     var body: some View {
         ZStack {
             AppSurface.canvas(for: colorScheme)
@@ -23,79 +27,30 @@ struct SettingsSheetView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 24) {
-                    // Header
-                    Text("Settings")
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
-                        .foregroundStyle(AppSurface.primaryText(for: colorScheme))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Header Bar with Title and Close Button
+                    headerBar
 
-                    // 1. Appearance Segmented Pill
+                    // 1. Appearance Mode Pill Switcher
                     SegmentedPillPicker(selectedMode: $settings.appearanceMode)
 
-                    // 2. Theme Accent Selector
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Theme")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
-                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    // 2. Theme Palettes (2x2 Contextual Wordle Grid)
+                    themeSection
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(ThemePalette.allCases) { palette in
-                                    themeCard(palette: palette)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
+                    // 3. Gameplay & Feedback
+                    gameplaySection
 
-                    // 3. Toggles
-                    VStack(spacing: 10) {
-                        toggleRow(
-                            icon: "iphone.radiowaves.left.and.right",
-                            iconColor: settings.themePalette.accentPrimary,
-                            title: "Haptic Feedback",
-                            isOn: $settings.hapticsEnabled
-                        )
-                    }
+                    // 4. Progress & In-Game Economy
+                    progressSection
 
-                    // 4. Statistics Button
-                    Button(action: { showingStatsSheet = true }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "chart.bar.fill")
-                                .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(activePalette.accentPrimary)
-                                .frame(width: 28)
+                    // 5. Data Management (Reset)
+                    dataSection
 
-                            Text("Statistics")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundStyle(AppSurface.primaryText(for: colorScheme))
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(AppSurface.card(for: colorScheme))
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    // 5. Reset Data
-                    Button(action: { showingResetAlert = true }) {
-                        Text("Reset All Data")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(red: 0.96, green: 0.25, blue: 0.37))
-                            .padding(.top, 4)
-                    }
+                    // 6. Minimalist Footer
+                    footerSection
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 36)
-                .padding(.bottom, 28)
+                .padding(.top, 24)
+                .padding(.bottom, 36)
             }
         }
         .alert("Reset All Data?", isPresented: $showingResetAlert) {
@@ -105,95 +60,348 @@ struct SettingsSheetView: View {
                 onDismiss()
             }
         } message: {
-            Text("This will reset all streaks, scores, and power-up charges.")
+            Text("This will permanently clear all streaks, game statistics, and coin balances.")
         }
         .sheet(isPresented: $showingStatsSheet) {
             StatsSheetView(viewModel: viewModel, onDismiss: {
                 showingStatsSheet = false
             })
             .presentationDetents([.medium, .large])
-            .presentationCornerRadius(20)
             .presentationDragIndicator(.visible)
             .preferredColorScheme(settings.appearanceMode.colorScheme)
         }
     }
 
-    private var activePalette: ThemePalette {
-        settings.themePalette
-    }
-
-    // Toggle Row
-    private func toggleRow(icon: String, iconColor: Color, title: String, isOn: Binding<Bool>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(iconColor)
-                .frame(width: 28)
-
-            Text(title)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+    // MARK: - Header Bar
+    private var headerBar: some View {
+        HStack(alignment: .center) {
+            Text("Settings")
+                .font(.system(size: 28, weight: .heavy, design: .default))
                 .foregroundStyle(AppSurface.primaryText(for: colorScheme))
 
             Spacer()
 
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .tint(activePalette.accentPrimary)
+            CircularPillButton(icon: "xmark", size: 36) {
+                HapticsManager.shared.keyTap()
+                onDismiss()
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(AppSurface.card(for: colorScheme))
-        )
     }
 
-    // Theme Card
+    // MARK: - Theme Palettes Section (2x2 Contextual Grid)
+    private var themeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("THEME PALETTE")
+                .font(.system(size: 12, weight: .bold, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                .padding(.horizontal, 4)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ],
+                spacing: 10
+            ) {
+                ForEach(ThemePalette.allCases) { palette in
+                    themeCard(palette: palette)
+                }
+            }
+        }
+    }
+
     private func themeCard(palette: ThemePalette) -> some View {
         let isSelected = settings.themePalette == palette
 
         return Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                 settings.themePalette = palette
                 HapticsManager.shared.keyTap()
             }
         }) {
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(palette.accentPrimary)
-                            .frame(width: 52, height: 52)
-
-                        WordleLogoShape()
-                            .fill(.white)
-                            .frame(width: 28, height: 22)
-                    }
-
+            VStack(alignment: .leading, spacing: 12) {
+                // Top row: Palette name & selection indicator
+                HStack(alignment: .center) {
                     Text(palette.rawValue)
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .foregroundStyle(AppSurface.primaryText(for: colorScheme))
-                        .lineLimit(1)
-                }
-                .frame(width: 88, height: 100)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isSelected ? AppSurface.recessed(for: colorScheme) : AppSurface.card(for: colorScheme))
-                )
-
-                if isSelected {
-                    Circle()
-                        .fill(AppSurface.primaryText(for: colorScheme))
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .black))
-                                .foregroundStyle(AppSurface.card(for: colorScheme))
+                        .font(.system(size: 13, weight: .bold, design: .default))
+                        .foregroundStyle(
+                            isSelected
+                                ? AppSurface.primaryText(for: colorScheme)
+                                : AppSurface.secondaryText(for: colorScheme)
                         )
-                        .offset(x: 4, y: -4)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    if isSelected {
+                        Circle()
+                            .fill(palette.accentPrimary)
+                            .frame(width: 18, height: 18)
+                            .overlay(
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9, weight: .black))
+                                    .foregroundStyle(.white)
+                            )
+                    } else {
+                        Circle()
+                            .fill(AppSurface.recessed(for: colorScheme))
+                            .frame(width: 18, height: 18)
+                    }
+                }
+
+                // Bottom row: "W I N" 3-tile Wordle sample showing palette evaluation states
+                HStack(spacing: 6) {
+                    miniTile(letter: "W", fill: palette.correctColor)
+                    miniTile(letter: "I", fill: palette.presentColor)
+                    miniTile(
+                        letter: "N",
+                        fill: colorScheme == .dark
+                            ? Color(red: 0.22, green: 0.22, blue: 0.25)
+                            : Color(red: 0.78, green: 0.78, blue: 0.81)
+                    )
                 }
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? AppSurface.card(for: colorScheme) : AppSurface.card(for: colorScheme).opacity(0.55))
+            )
         }
         .buttonStyle(.plain)
+    }
+
+    private func miniTile(letter: Character, fill: Color) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(fill)
+            .overlay(
+                Text(String(letter))
+                    .font(.system(size: 11, weight: .heavy, design: .default))
+                    .foregroundStyle(.white)
+            )
+            .frame(width: 26, height: 26)
+    }
+
+    // MARK: - Gameplay Section
+    private var gameplaySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("GAMEPLAY & FEEDBACK")
+                .font(.system(size: 12, weight: .bold, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                // Haptic Feedback Row
+                HStack(spacing: 12) {
+                    settingIconBadge(icon: "iphone.radiowaves.left.and.right", color: activePalette.accentPrimary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Haptic Feedback")
+                            .font(.system(size: 15, weight: .semibold, design: .default))
+                            .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+
+                        Text("Tactile keypress vibrations")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settings.hapticsEnabled)
+                        .labelsHidden()
+                        .tint(activePalette.accentPrimary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                // Divider
+                rowDivider
+
+                // Sound Effects Row
+                HStack(spacing: 12) {
+                    settingIconBadge(icon: "speaker.wave.2.fill", color: activePalette.presentColor)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sound Effects")
+                            .font(.system(size: 15, weight: .semibold, design: .default))
+                            .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+
+                        Text("Audio on letter evaluation")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settings.soundEffectsEnabled)
+                        .labelsHidden()
+                        .tint(activePalette.accentPrimary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(AppSurface.card(for: colorScheme))
+            )
+        }
+    }
+
+    // MARK: - Progress & Economy Section
+    private var progressSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("PROGRESS & ECONOMY")
+                .font(.system(size: 12, weight: .bold, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                // Statistics Row
+                Button(action: {
+                    HapticsManager.shared.keyTap()
+                    showingStatsSheet = true
+                }) {
+                    HStack(spacing: 12) {
+                        settingIconBadge(icon: "chart.bar.fill", color: activePalette.accentPrimary)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Game Statistics")
+                                .font(.system(size: 15, weight: .semibold, design: .default))
+                                .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+
+                            Text("\(viewModel.stats.gamesPlayed) played • \(viewModel.stats.winRatePercent)% win rate")
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+
+                // Divider
+                rowDivider
+
+                // Coin Balance Row
+                HStack(spacing: 12) {
+                    settingIconBadge(icon: "circle.circle.fill", color: Color(red: 0.98, green: 0.76, blue: 0.15))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Coin Balance")
+                            .font(.system(size: 15, weight: .semibold, design: .default))
+                            .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+
+                        Text("Earned through clean & fast solves")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "circle.circle.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color(red: 0.98, green: 0.76, blue: 0.15))
+
+                        Text("\(viewModel.coins)")
+                            .font(.system(size: 16, weight: .heavy, design: .default))
+                            .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(AppSurface.recessed(for: colorScheme))
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(AppSurface.card(for: colorScheme))
+            )
+        }
+    }
+
+    // MARK: - Data Management Section
+    private var dataSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DATA MANAGEMENT")
+                .font(.system(size: 12, weight: .bold, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                .padding(.horizontal, 4)
+
+            Button(action: {
+                HapticsManager.shared.keyTap()
+                showingResetAlert = true
+            }) {
+                HStack(spacing: 12) {
+                    settingIconBadge(icon: "trash.fill", color: Color(red: 0.96, green: 0.25, blue: 0.37))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reset All Data")
+                            .font(.system(size: 15, weight: .semibold, design: .default))
+                            .foregroundStyle(Color(red: 0.96, green: 0.25, blue: 0.37))
+
+                        Text("Clear streaks, guesses, and coins")
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(AppSurface.card(for: colorScheme))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Minimalist Footer
+    private var footerSection: some View {
+        VStack(spacing: 4) {
+            Text("Wordle • Swiss Minimalist Edition")
+                .font(.system(size: 12, weight: .medium, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
+
+            Text("Version 1.0 • All data stored locally")
+                .font(.system(size: 11, weight: .regular, design: .default))
+                .foregroundStyle(AppSurface.secondaryText(for: colorScheme).opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+    }
+
+    // MARK: - Helper Views
+    private func settingIconBadge(icon: String, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(AppSurface.recessed(for: colorScheme))
+            .frame(width: 32, height: 32)
+            .overlay(
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(color)
+            )
+    }
+
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(AppSurface.recessed(for: colorScheme))
+            .frame(height: 1)
+            .padding(.leading, 60)
     }
 }

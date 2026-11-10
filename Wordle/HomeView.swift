@@ -54,10 +54,17 @@ struct HomeView: View {
             SettingsSheetView(settings: settings, viewModel: viewModel, onDismiss: {
                 showingSettingsSheet = false
             })
-            .presentationDetents([.medium, .large])
-            .presentationCornerRadius(20)
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .preferredColorScheme(settings.appearanceMode.colorScheme)
+        }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-openSettings") {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    showingSettingsSheet = true
+                }
+            }
         }
     }
 

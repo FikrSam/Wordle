@@ -426,11 +426,11 @@ struct SegmentedPillPicker: View {
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: mode.iconName)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
 
-                        if isSelected || mode == .system {
+                        if isSelected {
                             Text(mode.rawValue)
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .font(.system(size: 14, weight: .bold, design: .default))
                         }
                     }
                     .foregroundStyle(
@@ -453,7 +453,7 @@ struct SegmentedPillPicker: View {
         }
         .padding(4)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(AppSurface.recessed(for: colorScheme))
         )
     }
