@@ -93,23 +93,25 @@ struct HomeView: View {
                 Spacer(minLength: 16)
 
                 // Stacked Header: Day of week above bold date (1:1 Sudoku Style)
-                VStack(spacing: 0) {
-                    Text(currentDayOfWeek)
-                        .font(.system(size: 32, weight: .bold, design: .default))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    AppSurface.primaryText(for: colorScheme).opacity(0.40),
-                                    AppSurface.primaryText(for: colorScheme).opacity(0.12)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
+                VStack(spacing: 6) {
+                    VStack(spacing: -10) {
+                        Text(currentDayOfWeek)
+                            .font(.system(size: 42, weight: .bold, design: .default))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        AppSurface.primaryText(for: colorScheme).opacity(0.45),
+                                        AppSurface.primaryText(for: colorScheme).opacity(0.08)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
                             )
-                        )
 
-                    Text(currentMonthAndDay)
-                        .font(.system(size: 38, weight: .heavy, design: .default))
-                        .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+                        Text(currentMonthAndDay)
+                            .font(.system(size: 38, weight: .heavy, design: .default))
+                            .foregroundStyle(AppSurface.primaryText(for: colorScheme))
+                    }
 
                     // Subtitle / Live status (Only shown when not completed to eliminate redundancy with solved CTA)
                     if !viewModel.dailyCompletedToday {
@@ -122,7 +124,6 @@ struct HomeView: View {
                                 .font(.system(size: 13, weight: .medium, design: .default))
                                 .foregroundStyle(AppSurface.secondaryText(for: colorScheme))
                         }
-                        .padding(.top, 6)
                     }
                 }
 
